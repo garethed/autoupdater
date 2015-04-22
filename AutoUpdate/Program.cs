@@ -11,9 +11,10 @@ namespace AutoUpdate
   static class Program
   {
     private const string PERSISTENCE_KEY = "AUTOUPDATE_PERSISTENCE_DATA";
-    private const string EXE_NAME = "tasks3.dll";
+    private const string EXE_NAME = "reminder.dll";
     //private const string SERVER_FILE_PATH = @"e:\home\tasktracker\bin\debug\tasks3.exe";
-    private const string SERVER_FILE_PATH = @"\\stingray\software\tasktracker\Beta\tasks3.dll";
+    //private const string SERVER_FILE_PATH = @"\\stingray\software\tasktracker\Beta\tasks3.dll";
+    private const string SERVER_FILE_PATH = @"\\zoo\share\Software\OutlookReminder\Resources\reminder.dll";
     private const double CHECK_INTERVAL_MINS = 0.5f;
 
     /// <summary>
@@ -41,59 +42,66 @@ namespace AutoUpdate
 
       while (client == null || client.ThreadState == ThreadState.Running)
       {
-        var exe = new FileInfo(SERVER_FILE_PATH);
-
-        if (!exe.Exists)
+        try
         {
-          if (client == null)
+          var exe = new FileInfo(SERVER_FILE_PATH);
+
+          if (exe.Exists && exe.LastWriteTimeUtc != lastModified.ToUniversalTime())
           {
-            var old = GetOldExe();
-
-            if (old != null)
+            var dir = Path.Combine(Application.UserAppDataPath, EXE_NAME + "." + exe.LastWriteTimeUtc.Ticks.ToString());
+            Directory.CreateDirectory(dir);
+            var newFile = new FileInfo(Path.Combine(dir, EXE_NAME));
+            if (!newFile.Exists)
             {
-              client = RunApp(old, null);
-            }
-            else
-            {
-              MessageBox.Show("Unable to locate latest version at " + SERVER_FILE_PATH + " and no local version exists");
-            }
-          }
-        }
-        else if (exe.LastWriteTimeUtc != lastModified.ToUniversalTime())
-        {
-          var dir = Path.Combine(Application.UserAppDataPath, EXE_NAME + "." + exe.LastWriteTimeUtc.Ticks.ToString());
-          Directory.CreateDirectory( dir);
-          var newFile = new FileInfo(Path.Combine(dir, EXE_NAME));
-          if (!newFile.Exists)
-          {
-            exe.CopyTo(newFile.FullName);
+              exe.CopyTo(newFile.FullName);
 
-            var serverDir = Path.GetDirectoryName(SERVER_FILE_PATH);
-            foreach (var dll in Directory.EnumerateFiles(serverDir).Where(f => f.EndsWith("dll")))
-            {
-              var local = Path.Combine(dir, Path.GetFileName(dll));
-
-              // File may exist if the application binary is also a dll
-              if (!File.Exists(local))
+              var serverDir = Path.GetDirectoryName(SERVER_FILE_PATH);
+              foreach (var dll in Directory.EnumerateFiles(serverDir).Where(f => f.EndsWith("dll")))
               {
-                File.Copy(dll, local);
-              }              
+                var local = Path.Combine(dir, Path.GetFileName(dll));
+
+                // File may exist if the application binary is also a dll
+                if (!File.Exists(local))
+                {
+                  File.Copy(dll, local);
+                }
+              }
+
+              // need this assembly to be accessible to new appdomain. Must use original assembly name otherwise client appdomains can't find it
+              var assembly = Assembly.GetCallingAssembly().Location;
+              File.Copy(assembly, Path.Combine(dir, "AutoUpdate.exe"));
+
             }
 
-            // need this assembly to be accessible to new appdomain. Must use original assembly name otherwise client appdomains can't find it
-            var assembly = Assembly.GetCallingAssembly().Location;
-            File.Copy(assembly, Path.Combine(dir, "AutoUpdate.exe"));
-
+            client = RunApp(newFile, client);
           }
 
-          client = RunApp(newFile, client);          
+        }
+        catch (Exception e)
+        {
+          System.Diagnostics.Debug.WriteLine("Error retrieving binaries from server " + e);
         }
 
-        waitable.WaitOne(TimeSpan.FromMinutes(CHECK_INTERVAL_MINS));
+        if (client == null)
+        {
+          var old = GetOldExe();
+
+          if (old != null)
+          {
+            client = RunApp(old, null);
+          }
+          else
+          {
+            MessageBox.Show("Unable to locate latest version at " + SERVER_FILE_PATH + " and no local version exists");
+            return;
+          }
+        }
       }
+
+      waitable.WaitOne(TimeSpan.FromMinutes(CHECK_INTERVAL_MINS));
     }
 
-    
+
 
     private static FileInfo GetOldExe()
     {
